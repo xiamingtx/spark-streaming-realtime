@@ -2,6 +2,7 @@ package com.xm.gmall.realtime.util
 
 import org.apache.kafka.clients.consumer.{ConsumerConfig, ConsumerRecord}
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerConfig, ProducerRecord}
+import org.apache.kafka.common.TopicPartition
 import org.apache.spark.streaming.StreamingContext
 import org.apache.spark.streaming.dstream.InputDStream
 import org.apache.spark.streaming.kafka010.{ConsumerStrategies, KafkaUtils, LocationStrategies}
@@ -53,6 +54,20 @@ object MyKafkaUtils {
       ssc,
       LocationStrategies.PreferConsistent,
       ConsumerStrategies.Subscribe[String, String](Array(topic), consumerConfigs)
+    )
+    kafkaDStream
+  }
+
+  /*
+    消费者
+    基于SparkStreaming消费, 获取到KafkaDStream, 使用指定的offset
+   */
+  def getKafkaDStream(ssc: StreamingContext, topic: String, groupId: String, offsets: Map[TopicPartition, Long]): InputDStream[ConsumerRecord[String, String]] = {
+    consumerConfigs.put(ConsumerConfig.GROUP_ID_CONFIG, groupId) // 动态设置groupId
+    val kafkaDStream: InputDStream[ConsumerRecord[String, String]] = KafkaUtils.createDirectStream(
+      ssc,
+      LocationStrategies.PreferConsistent,
+      ConsumerStrategies.Subscribe[String, String](Array(topic), consumerConfigs, offsets) // 指定offsets
     )
     kafkaDStream
   }
