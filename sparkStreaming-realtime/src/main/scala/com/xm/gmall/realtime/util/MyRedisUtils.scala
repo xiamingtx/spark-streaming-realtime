@@ -29,8 +29,9 @@ object MyRedisUtils {
 
       val host: String = MyPropsUtils(MyConfig.REDIS_HOST)
       val port: String = MyPropsUtils(MyConfig.REDIS_PORT)
+      val password: String = MyPropsUtils(MyConfig.REDIS_PASSWORD)
 
-      jedisPool = new JedisPool(jedisPoolConfig, host, port.toInt)
+      jedisPool = new JedisPool(jedisPoolConfig, host, port.toInt, 10000, password)
     }
     jedisPool.getResource
   }

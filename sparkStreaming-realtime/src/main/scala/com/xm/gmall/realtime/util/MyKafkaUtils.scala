@@ -123,4 +123,11 @@ object MyKafkaUtils {
       producer.close()
     }
   }
+
+  /*
+  刷写 将缓冲区的数据刷写到磁盘
+   */
+  def flush(): Unit = {
+    producer.flush()
+  }
 }
