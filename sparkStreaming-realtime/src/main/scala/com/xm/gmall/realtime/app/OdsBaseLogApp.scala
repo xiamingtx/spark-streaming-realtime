@@ -174,8 +174,7 @@ object OdsBaseLogApp {
                       val actionItemType: String = actionObj.getString("item_type")
                       val actionTs: Long = actionObj.getLong("ts")
                       //封装 PageActionLog
-                      val pageActionLog =
-                        PageActionLog(mid, uid, ar, ch, isNew, md, os, vc, pageId, lastPageId, pageItem, pageItemType, duringTime,actionId,actionItem,actionItemType,actionTs, ts)
+                      val pageActionLog: PageActionLog = PageActionLog(mid, uid, ar, ch, isNew, md, os, vc, pageId, lastPageId, pageItem, pageItemType, duringTime,actionId,actionItem,actionItemType,actionTs, ts)
                       //发送 Kafka
                       MyKafkaUtils.send(DWD_PAGE_ACTION_TOPIC,JSON.toJSONString(pageActionLog,new SerializeConfig(true)))
                     }

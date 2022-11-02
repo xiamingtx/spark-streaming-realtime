@@ -134,6 +134,11 @@ object OdsBaseDbApp {
                   // DWD_ORDER_INFO_I DWD_ORDER_INFO_U DWD_ORDER_INFO_D
                   val dwdTopicName: String = s"DWD_${tableName.toUpperCase}_${opValue}_1018"
                   MyKafkaUtils.send(dwdTopicName, data)
+
+                  // 模拟数据延迟
+                  if (tableName.equals("order_detail")) {
+                    Thread.sleep(200)
+                  }
                 }
                 if (dimTablesBC.value.contains(tableName)) {
                   // 维度数据
