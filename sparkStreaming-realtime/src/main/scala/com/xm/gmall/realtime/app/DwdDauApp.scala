@@ -2,12 +2,12 @@ package com.xm.gmall.realtime.app
 
 import com.alibaba.fastjson.{JSON, JSONObject}
 import com.xm.gmall.realtime.bean.{DauInfo, PageLog}
-import com.xm.gmall.realtime.util.{MyBeanUtils, MyKafkaUtils, MyOffsetUtils, MyRedisUtils}
+import com.xm.gmall.realtime.util.{MyBeanUtils, MyEsUtils, MyKafkaUtils, MyOffsetUtils, MyRedisUtils}
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
-import org.apache.spark.streaming.kafka010.HasOffsetRanges
+import org.apache.spark.streaming.kafka010.{HasOffsetRanges, OffsetRange}
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 import redis.clients.jedis.Jedis
 
@@ -56,10 +56,10 @@ object DwdDauApp {
     }
 
     // 4. 提取offset结束点
-    var offsetRanges: HasOffsetRanges = null
+    var offsetRanges: Array[OffsetRange] = null
     val offsetRangesDStream: DStream[ConsumerRecord[String, String]] = kafkaDStream.transform(
       rdd => {
-        offsetRanges = rdd.asInstanceOf[HasOffsetRanges]
+        offsetRanges = rdd.asInstanceOf[HasOffsetRanges].offsetRanges
         rdd
       }
     )
@@ -198,10 +198,36 @@ object DwdDauApp {
         dauInfoList.toIterator
       }
     )
-    dauInfoDStream.print(100)
+    // dauInfoDStream.print(100)
 
     // 写入到OLAP中
-
+    // 按照天分割索引 通过索引模板控制mapping、settings、aliases等
+    // 准备ES工具类
+    dauInfoDStream.foreachRDD(
+      rdd => {
+        rdd.foreachPartition(
+          dauInfoIter => {
+            val docs: List[(String, DauInfo)] = dauInfoIter.map(
+              dauInfo => (dauInfo.mid, dauInfo)
+            ).toList
+            // 索引名
+            // 如果是真实的实时环境 直接获取当前日期即可
+            // 因为我们是模拟数据 会生成不同天的数据
+            // 从第一条数据中获取日期
+            if (docs.nonEmpty) {
+              val ts: Long = docs.head._2.ts
+              val sdf: SimpleDateFormat = new SimpleDateFormat("yyyy-MM-dd")
+              val dataStr: String = sdf.format(new Date(ts))
+              val indexName: String = s"gmall_dau_info_1018_$dataStr"
+              // 写入到es中
+              MyEsUtils.bulkSave(indexName, docs)
+            }
+          }
+        )
+        // 提交offset
+        MyOffsetUtils.saveOffset(topicName, groupId, offsetRanges)
+      }
+    )
     ssc.start()
     ssc.awaitTermination()
   }

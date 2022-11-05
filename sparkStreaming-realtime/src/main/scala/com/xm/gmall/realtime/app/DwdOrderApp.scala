@@ -3,14 +3,14 @@ package com.xm.gmall.realtime.app
 import com.alibaba.fastjson.serializer.SerializeConfig
 import com.alibaba.fastjson.{JSON, JSONObject}
 import com.xm.gmall.realtime.bean.{OrderDetail, OrderInfo, OrderWide}
-import com.xm.gmall.realtime.util.{MyKafkaUtils, MyOffsetUtils, MyRedisUtils}
+import com.xm.gmall.realtime.util.{MyEsUtils, MyKafkaUtils, MyOffsetUtils, MyRedisUtils}
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
 import org.apache.spark.streaming.kafka010.{HasOffsetRanges, OffsetRange}
 import org.apache.spark.streaming.{Seconds, StreamingContext}
-import redis.clients.jedis.Jedis
+import redis.clients.jedis.{Jedis, Pipeline}
 
 import java.time.{LocalDate, Period}
 import java.util
@@ -38,6 +38,8 @@ import scala.collection.mutable.ListBuffer
  */
 object DwdOrderApp {
   def main(args: Array[String]): Unit = {
+    // 0. 还原状态
+    revertState()
     // 1. 准备环境
     val sparkConf: SparkConf = new SparkConf().setAppName("dwd_order_app").setMaster("local[4]")
     val ssc: StreamingContext = new StreamingContext(sparkConf, Seconds(5))
@@ -267,9 +269,62 @@ object DwdOrderApp {
       }
     }
 
-    orderWideDStream.print(1000)
+    // orderWideDStream.print(1000)
 
+    // 1. 索引分割 通过索引模板控制mapping setting aliases
+    // 2. 使用工具类
+    //写入 es
+    orderWideDStream.foreachRDD(
+      rdd => {
+        //driver
+        rdd.foreachPartition(
+          orderWideIter => {
+            //executor
+            val orderWideList: List[(String, OrderWide)] = orderWideIter.toList.map(orderWide => (orderWide.detail_id.toString , orderWide))
+            if(orderWideList.nonEmpty){
+              val orderWideT: (String , OrderWide) = orderWideList.head
+
+              val dt: String = orderWideT._2.create_date
+              val indexName: String = s"gmall_order_wide_$dt"
+
+              MyEsUtils.bulkSave(indexName, orderWideList)
+            }
+          }
+        )
+        //提交偏移量
+        MyOffsetUtils.saveOffset(orderInfoTopicName, orderInfoGroup , orderInfoOffsetRanges)
+        MyOffsetUtils.saveOffset(orderDetailTopicName, orderDetailGroup,orderDetailOffsetRanges)
+      }
+    )
     ssc.start()
     ssc.awaitTermination()
+  }
+
+  /**
+   * 状态还原
+   *
+   * 在每次启动实时任务时 进行一次状态还原 以es为准 将所有的mid提出来 覆盖到redis中
+   */
+  def revertState(): Unit = {
+    // 从es中查到所有的mid
+    val date: LocalDate = LocalDate.now()
+    val indexName: String = s"gmall_dau_info_1018_$date"
+    val fieldName: String = "mid"
+    val mids: List[String] = MyEsUtils.searchField(indexName, fieldName)
+    // 删除redis中记录的状态(所有的mid)
+    val jedis: Jedis = MyRedisUtils.getJedisFromPool()
+    val redisDauKey: String = s"DAU:$date"
+    jedis.del(redisDauKey)
+
+    // 将从es中查询到的mid覆盖到Redis中
+    if (mids.nonEmpty) {
+      val pipeline: Pipeline = jedis.pipelined()
+      for (mid <- mids) {
+        pipeline.sadd(redisDauKey, mid) // 不会直接到redis中执行
+      }
+
+      pipeline.sync() // 执行
+    }
+    jedis.close()
   }
 }
